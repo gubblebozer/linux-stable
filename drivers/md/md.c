@@ -564,6 +564,7 @@ void mddev_init(struct mddev *mddev)
 	mddev->last_sync_action = "none";
 	mddev->resync_min = 0;
 	mddev->resync_max = MaxSector;
+	mddev->resync_depth = MD_RESYNC_DEPTH_DEFAULT;
 	mddev->level = LEVEL_NONE;
 }
 EXPORT_SYMBOL_GPL(mddev_init);
@@ -4841,6 +4842,117 @@ out_unlock:
 static struct md_sysfs_entry md_max_sync =
 __ATTR(sync_max, S_IRUGO|S_IWUSR, max_sync_show, max_sync_store);
 
+// BLOCKBRIDGE
+static ssize_t
+resync_depth_show(struct mddev *mddev, char *page)
+{
+	return sprintf(page, "%d\n", mddev->resync_depth);
+}
+
+static ssize_t
+resync_depth_store(struct mddev *mddev, const char *buf, size_t len)
+{
+	unsigned int depth;
+	int rv;
+
+	if (!mddev->pers || !mddev->pers->resync_depth) {
+		pr_err("md: %s: resync_depth only applicable to RAID "
+		       "levels 1 and 10\n", mdname(mddev));
+		return -EINVAL;
+	}
+
+	rv = kstrtouint(buf, 10, &depth);
+	if (rv < 0)
+		return rv;
+
+	rv = mddev->pers->resync_depth(mddev, depth);
+	if (rv < 0)
+		return rv;
+
+	return len;
+}
+
+static struct md_sysfs_entry md_resync_depth =
+__ATTR(resync_depth, S_IRUGO|S_IWUSR, resync_depth_show, resync_depth_store);
+
+static ssize_t
+md_dump_show(struct mddev *mddev, char *page)
+{
+	if (!mddev->pers || !mddev->pers->dump)
+		return sprintf(page, "\n");
+
+	return mddev->pers->dump(mddev, page);
+}
+
+static struct md_sysfs_entry md_dump =
+	__ATTR_PREALLOC(dump, S_IRUGO, md_dump_show, NULL);
+
+static ssize_t
+barrier_show(struct mddev *mddev, char *page)
+{
+	if (!mddev->pers || !mddev->pers->barrier_show) {
+		pr_err("md: %s: barrier only applicable to RAID level 10\n",
+		       mdname(mddev));
+		return -EINVAL;
+	}
+
+	return mddev->pers->barrier_show(mddev, page);
+}
+
+static ssize_t
+barrier_raise(struct mddev *mddev, const char *buf, size_t len)
+{
+	u64 sect;
+	int rv;
+
+	if (!mddev->pers || !mddev->pers->barrier_raise) {
+		pr_err("md: %s: barrier only applicable to RAID level 10\n",
+		       mdname(mddev));
+		return -EINVAL;
+	}
+
+	rv = kstrtou64(buf, 10, &sect);
+	if (rv < 0)
+		return rv;
+
+	rv = mddev->pers->barrier_raise(mddev, (sector_t)sect);
+	if (rv < 0)
+		return rv;
+
+	return len;
+}
+
+
+static ssize_t
+barrier_lower(struct mddev *mddev, const char *buf, size_t len)
+{
+	u64 sect;
+	int rv;
+
+	if (!mddev->pers || !mddev->pers->barrier_lower) {
+		pr_err("md: %s: barrier only applicable to RAID level 10\n",
+		       mdname(mddev));
+		return -EINVAL;
+	}
+
+	rv = kstrtou64(buf, 10, &sect);
+	if (rv < 0)
+		return rv;
+
+	rv = mddev->pers->barrier_lower(mddev, (sector_t)sect);
+	if (rv < 0)
+		return rv;
+
+	return len;
+}
+
+static struct md_sysfs_entry md_barrier_raise =
+__ATTR(barrier_raise, S_IRUGO|S_IWUSR, barrier_show, barrier_raise);
+static struct md_sysfs_entry md_barrier_lower =
+__ATTR(barrier_lower, S_IRUGO|S_IWUSR, barrier_show, barrier_lower);
+
+// BLOCKBRIDGE
+
 static ssize_t
 suspend_lo_show(struct mddev *mddev, char *page)
 {
@@ -5139,6 +5251,10 @@ static struct attribute *md_redundancy_attrs[] = {
 	&md_suspend_hi.attr,
 	&md_bitmap.attr,
 	&md_degraded.attr,
+	&md_resync_depth.attr,
+	&md_dump.attr,
+	&md_barrier_raise.attr,
+	&md_barrier_lower.attr,
 	NULL,
 };
 static struct attribute_group md_redundancy_group = {
@@ -5757,6 +5873,7 @@ static void md_clean(struct mddev *mddev)
 	mddev->recovery_cp = 0;
 	mddev->resync_min = 0;
 	mddev->resync_max = MaxSector;
+	mddev->resync_depth = MD_RESYNC_DEPTH_DEFAULT;
 	mddev->reshape_position = MaxSector;
 	mddev->external = 0;
 	mddev->persistent = 0;

@@ -107,10 +107,9 @@ static void r1bio_pool_free(void *r1_bio, void *data)
 	kfree(r1_bio);
 }
 
-#define RESYNC_DEPTH 32
+#define RESYNC_DEPTH_MAX 32
 #define RESYNC_SECTORS (RESYNC_BLOCK_SIZE >> 9)
-#define RESYNC_WINDOW (RESYNC_BLOCK_SIZE * RESYNC_DEPTH)
-#define RESYNC_WINDOW_SECTORS (RESYNC_WINDOW >> 9)
+#define RESYNC_WINDOW (RESYNC_BLOCK_SIZE * RESYNC_DEPTH_MAX)
 #define CLUSTER_RESYNC_WINDOW (16 * RESYNC_WINDOW)
 #define CLUSTER_RESYNC_WINDOW_SECTORS (CLUSTER_RESYNC_WINDOW >> 9)
 
@@ -846,6 +845,7 @@ static void flush_pending_writes(struct r1conf *conf)
  */
 static void raise_barrier(struct r1conf *conf, sector_t sector_nr)
 {
+	struct mddev *mddev = conf->mddev;
 	int idx = sector_to_idx(sector_nr);
 
 	spin_lock_irq(&conf->resync_lock);
@@ -871,13 +871,13 @@ static void raise_barrier(struct r1conf *conf, sector_t sector_nr)
 	 * A: while the array is in frozen state
 	 * B: while conf->nr_pending[idx] is not 0, meaning regular I/O
 	 *    existing in corresponding I/O barrier bucket.
-	 * C: while conf->barrier[idx] >= RESYNC_DEPTH, meaning reaches
+	 * C: while conf->barrier[idx] >= resync_depth, meaning reaches
 	 *    max resync count which allowed on current I/O barrier bucket.
 	 */
 	wait_event_lock_irq(conf->wait_barrier,
 			    !conf->array_frozen &&
 			     !atomic_read(&conf->nr_pending[idx]) &&
-			     atomic_read(&conf->barrier[idx]) < RESYNC_DEPTH,
+			     atomic_read(&conf->barrier[idx]) < mddev->resync_depth,
 			    conf->resync_lock);
 
 	atomic_inc(&conf->nr_sync_pending);
@@ -3311,6 +3311,24 @@ static void *raid1_takeover(struct mddev *mddev)
 	return ERR_PTR(-EINVAL);
 }
 
+static int raid1_resync_depth(struct mddev *mddev, int depth)
+{
+	struct r1conf *conf = mddev->private;
+
+	if (depth == 0 || depth > RESYNC_DEPTH_MAX) {
+		pr_err("md: %s: resync_depth must be between 0 and "
+		       "%d for RAID 1\n", mdname(mddev), RESYNC_DEPTH_MAX);
+		return -EINVAL;
+	}
+
+	mddev->resync_depth = depth;
+	wake_up(&conf->wait_barrier);
+
+	pr_debug("md: %s: resync_depth set to %d\n", mdname(mddev), depth);
+
+	return 0;
+}
+
 static struct md_personality raid1_personality =
 {
 	.name		= "raid1",
@@ -3331,6 +3349,7 @@ static struct md_personality raid1_personality =
 	.quiesce	= raid1_quiesce,
 	.takeover	= raid1_takeover,
 	.congested	= raid1_congested,
+	.resync_depth	= raid1_resync_depth,
 };
 
 static int __init raid_init(void)

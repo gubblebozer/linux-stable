@@ -2,6 +2,33 @@
 #ifndef _RAID10_H
 #define _RAID10_H
 
+/*
+ * This part is copied from the implementation in raid1
+ * each barrier unit size is 64MB fow now
+ * note: it must be larger than RESYNC_DEPTH
+ */
+#define BARRIER_UNIT_SECTOR_BITS	17
+#define BARRIER_UNIT_SECTOR_SIZE	(1<<17)
+#define BARRIER_UNIT_MASK           ((BARRIER_UNIT_SECTOR_SIZE)-1)
+
+/*
+ * In struct r10conf, the following members are related to I/O barrier
+ * buckets,
+ *	atomic_t	*nr_pending;
+ *	atomic_t	*nr_waiting;
+ *	atomic_t	*nr_queued;
+ *	atomic_t	*barrier;
+ * Each of them points to array of atomic_t variables, each array is
+ * designed to have BARRIER_BUCKETS_NR elements and occupy a single
+ * memory page. The data width of atomic_t variables is 4 bytes, equal
+ * to 1<<(ilog2(sizeof(atomic_t))), BARRIER_BUCKETS_NR_BITS is defined
+ * as (PAGE_SHIFT - ilog2(sizeof(int))) to make sure an array of
+ * atomic_t variables with BARRIER_BUCKETS_NR elements just exactly
+ * occupies a single memory page.
+ */
+#define BARRIER_BUCKETS_NR_BITS		(PAGE_SHIFT - ilog2(sizeof(atomic_t)))
+#define BARRIER_BUCKETS_NR		(1<<BARRIER_BUCKETS_NR_BITS)
+
 struct raid10_info {
 	struct md_rdev	*rdev, *replacement;
 	sector_t	head_position;
@@ -11,6 +38,9 @@ struct raid10_info {
 						 * recovering this device.
 						 */
 };
+
+// BLOCKBRIDGE
+#define RAID10_BARRIER_MAX 32
 
 struct r10conf {
 	struct mddev		*mddev;
@@ -65,11 +95,13 @@ struct r10conf {
 	int			pending_count;
 
 	spinlock_t		resync_lock;
-	atomic_t		nr_pending;
-	int			nr_waiting;
-	int			nr_queued;
-	int			barrier;
-	int			array_freeze_pending;
+	atomic_t		nr_sync_pending;
+	atomic_t		*nr_pending;
+	atomic_t		*nr_waiting;
+	atomic_t		*nr_queued;
+	atomic_t		*barrier;
+	atomic64_t       	waited;
+	int			array_frozen;
 	sector_t		next_resync;
 	int			fullsync;  /* set to 1 if a full sync is needed,
 					    * (fresh device added).

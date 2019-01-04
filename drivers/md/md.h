@@ -39,6 +39,10 @@
  * be retried.
  */
 #define	MD_FAILFAST	(REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT)
+
+// Blockbridge
+#define MD_RESYNC_DEPTH_DEFAULT 32
+
 /*
  * MD's 'extended' device
  */
@@ -390,6 +394,8 @@ struct mddev {
 							 * starts here */
 	sector_t			resync_max;	/* resync should pause
 							 * when it gets here */
+	int				resync_depth;	/* resync I/O depth */
+	int				dbg_barrier;	/* debug barrier */
 
 	struct kernfs_node		*sysfs_state;	/* handle for 'array_state'
 							 * file in sysfs.
@@ -566,6 +572,14 @@ struct md_personality
 	int (*congested)(struct mddev *mddev, int bits);
 	/* Changes the consistency policy of an active array. */
 	int (*change_consistency_policy)(struct mddev *mddev, const char *buf);
+	/* BLOCKBRIDGE: limit number of concurrent resync operations */
+	int (*resync_depth)(struct mddev *mddev, int depth);
+	/* BLOCKBRIDGE: diagnostic output */
+	ssize_t (*dump)(struct mddev *mddev, char *page);
+	/* BLOCKBRIDGE: diagnostic raid barrier */
+	ssize_t (*barrier_show)(struct mddev *mddev, char *page);
+	int (*barrier_raise)(struct mddev *mddev, sector_t barrier_sect);
+	int (*barrier_lower)(struct mddev *mddev, sector_t barrier_sect);
 };
 
 struct md_sysfs_entry {

@@ -80,3 +80,10 @@ static void md_bio_reset_resync_pages(struct bio *bio, struct resync_pages *rp,
 		size -= len;
 	} while (idx++ < RESYNC_PAGES && size > 0);
 }
+
+/* sector mapped to bucket */
+static inline int sector_to_idx(sector_t sector)
+{
+	return hash_long(sector >> BARRIER_UNIT_SECTOR_BITS,
+			 BARRIER_BUCKETS_NR_BITS);
+}
