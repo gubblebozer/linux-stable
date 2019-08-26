@@ -2758,7 +2758,7 @@ static void handle_read_error(struct mddev *mddev, struct r10bio *r10_bio)
 		md_error(mddev, rdev);
 
 	rdev_dec_pending(rdev, mddev);
-	allow_barrier(conf, bio->bi_iter.bi_sector);
+	allow_barrier(conf, r10_bio->master_bio->bi_iter.bi_sector);
 	r10_bio->state = 0;
 	raid10_read_request(mddev, r10_bio->master_bio, r10_bio);
 }
